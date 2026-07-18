@@ -1,0 +1,1190 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sara & Emmanuel: Un Año ❤️</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#0A0010;display:flex;align-items:center;justify-content:center;overflow:hidden;font-family:'Segoe UI',sans-serif}
+canvas{display:block;box-shadow:0 12px 40px rgba(0,0,0,0.7)}
+</style>
+</head>
+<body>
+<canvas id="g"></canvas>
+<script src="sprites.js"></script>
+<script>
+'use strict';
+const GW=640,GH=480,TS=32;
+const cv=document.getElementById('g');
+const cx=cv.getContext('2d');
+cv.width=GW; cv.height=GH;
+cx.imageSmoothingEnabled=true;
+cx.imageSmoothingQuality='high';
+
+const resize=()=>{const s=Math.min(window.innerWidth/GW,window.innerHeight/GH);cv.style.width=GW*s+'px';cv.style.height=GH*s+'px';};
+window.addEventListener('resize',resize);resize();
+
+// ── INPUT ────────────────────────────────────────────────────
+const K={},KJ={};
+window.addEventListener('keydown',e=>{if(!K[e.code])KJ[e.code]=true;K[e.code]=true;if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','KeyW','KeyS','KeyA','KeyD'].includes(e.code))e.preventDefault();});
+window.addEventListener('keyup',e=>{K[e.code]=false;});
+const kd=c=>!!K[c];
+function kjust(c){if(KJ[c]){KJ[c]=false;return true;}return false;}
+const isAct=()=>kjust('KeyZ')||kjust('Enter')||kjust('Space');
+const movL=()=>kd('ArrowLeft')||kd('KeyA');
+const movR=()=>kd('ArrowRight')||kd('KeyD');
+const movU=()=>kd('ArrowUp')||kd('KeyW');
+const movD_k=()=>kd('ArrowDown')||kd('KeyS');
+
+// ── SPRITE IMAGE LOADING ──────────────────────────────────────
+const IMG={};
+let imgsLoaded=0,imgTotal=0;
+function loadImg(key){
+  imgTotal++;
+  const im=new Image();
+  im.onload=()=>{IMG[key]=im;imgsLoaded++;};
+  im.src=SPRITES_B64[key]||'';
+}
+// Load all sprites
+Object.keys(SPRITES_B64).forEach(k=>loadImg(k));
+
+function getImg(key){return IMG[key]||null;}
+
+// ── DRAW SPRITE HELPER ────────────────────────────
+function drawSprite(key, x, y, w, h, flipX=false){
+  const im=getImg(key);
+  if(!im)return;
+  cx.save();
+  if(flipX){
+    cx.translate(Math.floor(x)+w, 0);
+    cx.scale(-1,1);
+    cx.drawImage(im, 0, Math.floor(y), w, h);
+  } else {
+    cx.drawImage(im, Math.floor(x), Math.floor(y), w, h);
+  }
+  cx.restore();
+}
+
+const CHAR_W=64, CHAR_H=96;
+
+// Character drawing: Sara uses right-side sprites flipped for left direction
+function getSaraKey(dir, frame){
+  const walking = frame > 0;
+  // For left direction, use right sprites (will be flipped in drawChar)
+  const lookupDir = (dir==='left') ? 'right' : (dir||'down');
+  if(!walking) return `sara_${lookupDir}_idle`;
+  const walkIdx = ((frame-1)%4)+1;
+  const key = `sara_${lookupDir}_walk${walkIdx}`;
+  return IMG[key] ? key : `sara_${lookupDir}_idle`;
+}
+
+function getEmmanKey(dir, frame){
+  const walking = frame > 0;
+  const idleKey = `emman_idle${(Math.floor(Date.now()/600)%4)+1}`;
+  if(dir==='up') return walking ? 'emman_up_walk1' : 'emman_up_idle';
+  if(dir==='down'){
+    if(!walking) return 'emman_down_idle';
+    const wkeys=['emman_down_idle','emman_down_walk1','emman_down_walk2','emman_down_walk3'];
+    return wkeys[frame % wkeys.length];
+  }
+  if(dir==='right') return walking ? `emman_right_walk${((frame-1)%4)+1}` : idleKey;
+  // For emman left: also use right sprites flipped
+  if(dir==='left') return walking ? `emman_right_walk${((frame-1)%4)+1}` : idleKey;
+  return 'emman_down_idle';
+}
+
+function drawChar(who, x, y, dir, frame){
+  const flipX = (dir==='left');  // mirror right sprites for left direction
+  const key = who==='sara' ? getSaraKey(dir,frame) : getEmmanKey(dir,frame);
+  drawSprite(key, x, y, CHAR_W, CHAR_H, flipX);
+}
+
+// ── TILE DRAWING ──────────────────────────────────────────────
+function drawTile(id, px, py, tx, ty){
+  switch(id){
+    case 0: // Building wall
+      cx.fillStyle='#4A342B'; cx.fillRect(px,py,TS,TS);
+      cx.fillStyle='#3A2820'; cx.fillRect(px+2,py+2,TS-4,TS-4);
+      cx.fillStyle='#5C453C'; cx.fillRect(px+2,py+2,TS-4,4);
+      break;
+    case 1: // Cobblestone path
+      const base=(tx+ty)%2===0?'#A89888':'#9E8E7E';
+      cx.fillStyle=base; cx.fillRect(px,py,TS,TS);
+      cx.strokeStyle='rgba(0,0,0,0.15)'; cx.lineWidth=1;
+      cx.beginPath(); cx.arc(px+8,py+8,6,0,Math.PI*2); cx.stroke();
+      cx.beginPath(); cx.arc(px+24,py+24,6,0,Math.PI*2); cx.stroke();
+      break;
+    case 2: // Grass
+      cx.fillStyle=(tx+ty)%3===0?'#5F9B43':'#558B3A'; cx.fillRect(px,py,TS,TS);
+      if((tx*5+ty*3)%7===0){cx.fillStyle='rgba(0,0,0,0.08)';cx.fillRect(px+4,py+6,3,10);}
+      if((tx*3+ty*7)%9===0){cx.fillStyle='rgba(0,0,0,0.08)';cx.fillRect(px+18,py+16,3,8);}
+      break;
+    case 3: // Tree (drawn via sprite in decorations)
+      cx.fillStyle='#558B3A'; cx.fillRect(px,py,TS,TS);
+      break;
+    case 4: // Flower
+      cx.fillStyle='#5F9B43'; cx.fillRect(px,py,TS,TS);
+      const t4=Date.now()/800;
+      cx.fillStyle='#FFB3C6'; cx.beginPath(); cx.arc(px+16,py+16,5,0,Math.PI*2); cx.fill();
+      cx.fillStyle='#FFD700'; cx.beginPath(); cx.arc(px+16,py+16,2,0,Math.PI*2); cx.fill();
+      break;
+    case 6: // Wood interior floor
+      cx.fillStyle=(tx+ty)%2===0?'#7D5230':'#6B4424'; cx.fillRect(px,py,TS,TS);
+      cx.strokeStyle='rgba(0,0,0,0.2)'; cx.lineWidth=1;
+      cx.strokeRect(px,py,TS,TS);
+      break;
+    case 7: // Stone plaza / fountain area
+      cx.fillStyle='#C8BDB0'; cx.fillRect(px,py,TS,TS);
+      cx.strokeStyle='rgba(0,0,0,0.1)'; cx.lineWidth=1; cx.strokeRect(px,py,TS,TS);
+      break;
+    case 8: // Interior wall
+      cx.fillStyle='#E8D8C8'; cx.fillRect(px,py,TS,TS);
+      cx.fillStyle='#D4C0AC'; cx.fillRect(px,py,TS,4);
+      break;
+  }
+}
+
+// ── MAP GRID HELPERS ──────────────────────────────────────────
+function makeGrid(w,h,fill='2'){let g=[];for(let y=0;y<h;y++)g.push(new Array(w).fill(fill));return g;}
+function fillRect(g,x,y,w,h,ch){for(let cy=y;cy<y+h;cy++)for(let cx2=x;cx2<x+w;cx2++){if(cy>=0&&cy<g.length&&cx2>=0&&cx2<g[0].length)g[cy][cx2]=ch;}}
+function fillRow(g,x,y,len,ch){fillRect(g,x,y,len,1,ch);}
+function fillCol(g,x,y,len,ch){fillRect(g,x,y,1,len,ch);}
+
+const MAP_DATA={};
+
+// ── TOWN (40x30) ──────────────────────────────────────────────
+{
+  const w=40,h=30,g=makeGrid(w,h,'2');
+  // Borders of trees
+  fillRow(g,0,0,w,'3');fillRow(g,0,h-1,w,'3');fillCol(g,0,0,h,'3');fillCol(g,w-1,0,h,'3');
+  // Main roads
+  fillCol(g,19,0,h,'1');fillCol(g,20,0,h,'1');
+  fillRow(g,0,14,w,'1');fillRow(g,0,15,w,'1');
+  // Plaza center (fountain area)
+  fillRect(g,17,12,6,6,'7');
+  // Buildings (shops)
+  fillRect(g,9,7,4,3,'0'); // Tiendita
+  fillRect(g,9,17,4,3,'0'); // La Puerta
+  fillRect(g,29,17,4,3,'0'); // Taberna
+  // Doorways passable
+  g[10][10]='1';g[10][11]='1';
+  g[20][10]='1';g[20][11]='1';
+  g[20][30]='1';g[20][31]='1';
+
+  MAP_DATA.town={name:'Dolores Centro',grid:g.map(r=>r.join('')),
+    portals:[
+      {x:19,y:0,w:2,h:1,target:'uni',tx:14*TS,ty:18*TS,dir:'up'},
+      {x:19,y:29,w:2,h:1,target:'deportiva',tx:25*TS,ty:3*TS,dir:'down'},
+      {x:0,y:14,w:1,h:2,target:'callejon',tx:27*TS,ty:5*TS,dir:'left'},
+      {x:39,y:14,w:1,h:2,target:'paraiso',tx:2*TS,ty:20*TS,dir:'right'},
+      {x:10,y:10,w:2,h:1,target:'tiendita',tx:4.5*TS,ty:4*TS,dir:'up'},
+      {x:10,y:20,w:2,h:1,target:'puerta',tx:4.5*TS,ty:4*TS,dir:'up'},
+      {x:30,y:20,w:2,h:1,target:'taberna',tx:4.5*TS,ty:4*TS,dir:'up'},
+    ]};
+}
+
+// ── UNI (30x25) ───────────────────────────────────────────────
+{
+  const w=30,h=25,g=makeGrid(w,h,'2');
+  fillRow(g,0,0,w,'0');fillRow(g,0,h-1,w,'0');fillCol(g,0,0,h,'0');fillCol(g,w-1,0,h,'0');
+  // Impassable wall behind and covering the university building (y=1 to 8, x=5 to 24)
+  fillRect(g,5,1,20,8,'0');
+  // Main roads
+  fillCol(g,14,9,h-1,'1');fillCol(g,15,9,h-1,'1');
+  // Secondary buildings (walkways)
+  fillRect(g,4,14,7,5,'0');fillRect(g,19,14,7,5,'0');
+  fillRow(g,4,19,7,'1');fillRow(g,19,19,7,'1');
+  MAP_DATA.uni={name:'Campus UTNG',grid:g.map(r=>r.join('')),
+    portals:[{x:14,y:24,w:2,h:1,target:'town',tx:19.5*TS,ty:2.5*TS,dir:'down'}]};
+}
+
+// ── CALLEJÓN (30x15) ──────────────────────────────────────────
+{
+  const w=30,h=15,g=makeGrid(w,h,'0');
+  fillRect(g,0,5,w,5,'1'); // walkway
+  fillRect(g,0,0,w,2,'3');fillRect(g,0,h-2,w,2,'3');
+  MAP_DATA.callejon={name:'El Callejón (Tacos)',grid:g.map(r=>r.join('')),
+    portals:[{x:29,y:5,w:1,h:5,target:'town',tx:2*TS,ty:15*TS,dir:'right'}]};
+}
+
+// ── DEPORTIVA (60x50) ─────────────────────────────────────────
+{
+  const w=60,h=50,g=makeGrid(w,h,'2');
+  fillRow(g,0,0,w,'3');fillRow(g,0,h-1,w,'3');fillCol(g,0,0,h,'3');fillCol(g,w-1,0,h,'3');
+  // Entrance path
+  fillCol(g,24,0,10,'1');fillCol(g,25,0,10,'1');
+  // Skate area (stone tiles)
+  fillRect(g,15,8,20,8,'7');
+  // Soccer field outline
+  fillRow(g,10,18,40,'1');fillRow(g,10,36,40,'1');fillCol(g,10,18,19,'1');fillCol(g,49,18,19,'1');
+  // Center spot
+  g[27][29]='7';
+  MAP_DATA.deportiva={name:'Parque La Deportiva',grid:g.map(r=>r.join('')),
+    portals:[{x:24,y:0,w:2,h:1,target:'town',tx:19.5*TS,ty:25*TS,dir:'up'}]};
+}
+
+// ── PARAÍSO (60x50) ───────────────────────────────────────────
+{
+  const w=60,h=50,g=makeGrid(w,h,'2');
+  fillRow(g,0,0,w,'3');fillRow(g,0,h-1,w,'3');fillCol(g,0,0,h,'3');fillCol(g,w-1,0,h,'3');
+  // Entry road
+  fillRow(g,0,20,25,'1');
+  // House outer solid collision block (y=15 to 23, x=25 to 37)
+  fillRect(g,25,15,13,9,'0');
+  // Walkable path in front of door
+  fillRect(g,30,24,2,1,'1');
+
+  MAP_DATA.paraiso={name:'El Paraíso',grid:g.map(r=>r.join('')),
+    portals:[
+      {x:0,y:19,w:1,h:3,target:'town',tx:37*TS,ty:15*TS,dir:'left'},
+      {x:30,y:24,w:2,h:1,target:'casa_sara',tx:4.5*TS,ty:4*TS,dir:'up'}
+    ]};
+}
+
+// ── CASA DE SARA (10x10) ──────────────────────────────────────
+MAP_DATA.casa_sara={
+  name:'Casa de Sara',
+  grid:['0000000000','0888888880','0666666660','0666666660','0666666660','0666666660','0666666660','0666666660','0666666660','0000110000'],
+  portals:[{x:4,y:9,w:2,h:1,target:'paraiso',tx:30.5*TS,ty:25.5*TS,dir:'down'}]
+};
+
+// ── SHOPS (10x10) ─────────────────────────────────────────────
+function makeShop(returnTx,returnTy){return {
+  grid:['0000000000','0888888880','0666666660','0666666660','0666666660','0666666660','0666666660','0666666660','0666666660','0000110000'],
+  portals:[{x:4,y:9,w:2,h:1,target:'town',tx:returnTx*TS,ty:returnTy*TS,dir:'down'}]
+};}
+MAP_DATA.tiendita={name:'La Tiendita (Malteadas)',...makeShop(10.5,12.5)};
+MAP_DATA.puerta={name:'Café La Puerta',...makeShop(10.5,22.5)};
+MAP_DATA.taberna={name:'La Taberna',...makeShop(30.5,22.5)};
+
+// ── CAMERA ───────────────────────────────────────────────────
+function getCamera(){
+  const map=MAP_DATA[gs.map];
+  const mw=map.grid[0].length*TS,mh=map.grid.length*TS;
+  let camX=gs.player.x+CHAR_W/2-GW/2;
+  let camY=gs.player.y+CHAR_H/2-GH/2;
+  if(mw<GW){camX=-(GW-mw)/2;}else{camX=Math.max(0,Math.min(camX,mw-GW));}
+  if(mh<GH){camY=-(GH-mh)/2;}else{camY=Math.max(0,Math.min(camY,mh-GH));}
+  return{x:camX,y:camY};
+}
+
+// ── GAME STATE ───────────────────────────────────────────────
+const gs={
+  scene:'title',map:'uni',chapter:1,
+  memories:new Set(),
+  bossIdx:0,saraHp:80,saraMaxHp:80,bossHp:0,bossMaxHp:0,
+  battlePhase:'intro',battleMsg:'',battleMsgTimer:0,battleAnim:0,
+  saraShake:0,bossShake:0,
+  cutFrame:0,cutTimer:0,
+  dlgLines:[],dlgIdx:0,dlgActive:false,dlgCallback:null,
+  dlgChar:'',dlgCharRole:'npc',dlgTyped:'',dlgTypeT:0,
+  interactPrompt:false,interactTarget:null,
+  endFrame:0,endTimer:0,
+  player:{x:14*TS,y:10*TS,dir:'down',frame:0,frameT:0,moving:false},
+  fade:0,fadeState:'none',fadeTarget:null,
+};
+const MEMORIES_NEEDED=6;
+
+// ── DIALOGUES ────────────────────────────────────────────────
+const DLGS={
+  em_npc:['Emmanuel: "...Sara."','Emmanuel: "Oye... te he estado queriendo decir algo."','Emmanuel: "¿Quieres ser mi novia?"'],
+  em_yes:['Sara: "(Sonríe sin decir nada por un momento...)"','Sara: "...Sí. ❤️"','Emmanuel: "He preparado algo especial para ti, pero primero debemos juntar nuestros recuerdos."','Emmanuel: "Busca en los distintos lugares que visitamos. El minimapa arriba a la derecha te guiará."'],
+  mem_callejon:['Callejón de los Tacos','Sara: "Después de clases, siempre veníamos aquí por unos tacos..."','Sara: "Salíamos juntos, cansados, hambrientos... y era lo mejor del día. Nos reíamos de todo."','(+1 Recuerdo guardado)'],
+  mem_tiendita:['La Tiendita de Malteadas','Sara: "Qué bonito lugar era ese. Nos encantaba ir a tomar malteadas ahí."','Sara: "Siempre éramos nosotros dos platicando y riéndonos. Me hacía muy feliz."','(+1 Recuerdo guardado)'],
+  mem_puerta:['Café La Puerta','Sara: "Un café tan bonito y elegante. Los dos nos arreglamos bien ese día."','Sara: "Recuerdo cuando no te acepté tu vasito de frappé de Oreo por pena. 😳"','(+1 Recuerdo guardado)'],
+  mem_taberna:['La Taberna — Primera Cita','Sara: "Aquí fue nuestra primera cita. Estaba muy nerviosa."','Sara: "Solo platicamos por horas y nos conocimos mejor. Desde ese día supe que era especial."','(+1 Recuerdo guardado)'],
+  mem_deportiva:['La Deportiva','Sara: "Un parque enorme. Pasábamos por la pista de skate y las canchas."','Sara: "Caminar tomados de la mano hacía que cualquier tarde fuera perfecta."','(+1 Recuerdo guardado)'],
+  mem_paraiso:['El Paraíso','Sara: "Mi casita en el ranchito. Todo verde y tranquilo."','Sara: "Te recibió mi familia muy bien. Me hacía feliz verte ahí."','(+1 Recuerdo guardado)'],
+  memories_full:['(Se han reunido todos los recuerdos...)','Las sombras del pasado comienzan a oscurecer el Centro...','¡Hay que derrotarlos para que el amor pueda continuar!'],
+  boss_intro:['El Centro de Dolores se ha sumido en la oscuridad.','Emmanuel cometió errores... los celos, la distancia, la necedad.','¡Hay que derrotarlos!'],
+  boss1_intro:['JEFE: LOS CELOS','Una sombra que no te dejaba tener amigos.','¡Derrótala con el amor y la confianza!'],
+  boss1_win:['¡Los celos cayeron!','El amor verdadero confía. No controla.'],
+  boss2_intro:['JEFE: LA DISTANCIA','4 meses de silencio y lejanía.','Se siente frío e inalcanzable.'],
+  boss2_win:['¡La distancia cedió!','Los recuerdos permanecen aunque estemos lejos.'],
+  boss3_intro:['JEFE: LA NECEDAD','Las palabras vacías. El "sí, ya cambio..." sin cambiar.','El orgullo de no aceptar las fallas.'],
+  boss3_win:['¡La necedad se derrumbó!','Reconocer los errores es la mayor muestra de amor.'],
+};
+
+// ── MAP EVENTS ───────────────────────────────────────────────
+const MAP_EVENTS={
+  town:[{id:'em_npc',tx:20,ty:15,range:1.8,ch:1,type:'npc'}],
+  uni:[{id:'hint_uni',tx:14,ty:10,range:1.5,ch:1,type:'hint'}],
+  callejon:[{id:'mem_callejon',tx:7,ty:7,range:1.5,ch:2,type:'memory'}],
+  tiendita:[{id:'mem_tiendita',tx:5,ty:5,range:1.5,ch:2,type:'memory'}],
+  puerta:[{id:'mem_puerta',tx:5,ty:5,range:1.5,ch:2,type:'memory'}],
+  taberna:[{id:'mem_taberna',tx:5,ty:5,range:1.5,ch:2,type:'memory'}],
+  deportiva:[{id:'mem_deportiva',tx:25,ty:27,range:1.8,ch:2,type:'memory'}],
+  paraiso:[],
+  casa_sara:[{id:'mem_paraiso',tx:5,ty:5,range:1.5,ch:2,type:'memory'}],
+};
+
+// ── DIALOGUE SYSTEM ──────────────────────────────────────────
+const SPEED=30;
+function startDlg(lines,arg1=null,arg2=null,role='npc'){
+  gs.dlgLines=lines;gs.dlgIdx=0;gs.dlgActive=true;
+  gs.dlgTyped='';gs.dlgTypeT=0;
+  if(typeof arg1==='function'){gs.dlgCallback=arg1;gs.dlgChar=(typeof arg2==='string')?arg2:'';}
+  else if(typeof arg1==='string'){gs.dlgChar=arg1;gs.dlgCallback=(typeof arg2==='function')?arg2:null;}
+  else{gs.dlgChar='';gs.dlgCallback=null;}
+  gs.dlgCharRole=role;
+}
+function updateDlg(dt){
+  if(!gs.dlgActive)return;
+  const cur=gs.dlgLines[gs.dlgIdx]||'';
+  if(gs.dlgTyped.length<cur.length){gs.dlgTypeT+=dt;gs.dlgTyped=cur.slice(0,Math.min(Math.floor(gs.dlgTypeT*SPEED),cur.length));}
+  if(isAct()){
+    if(gs.dlgTyped.length<cur.length){gs.dlgTyped=cur;return;}
+    sfx('dlg');gs.dlgIdx++;
+    if(gs.dlgIdx>=gs.dlgLines.length){gs.dlgActive=false;if(gs.dlgCallback)gs.dlgCallback();}
+    else{gs.dlgTyped='';gs.dlgTypeT=0;}
+  }
+}
+
+// Auto-detect speaker from line prefix
+function getSpeakerFromLine(line){
+  if(line.startsWith('Sara:'))return{name:'Sara',role:'sara'};
+  if(line.startsWith('Emmanuel:'))return{name:'Emmanuel',role:'emman'};
+  return{name:gs.dlgChar||'',role:gs.dlgCharRole||'npc'};
+}
+
+function renderDlg(){
+  if(!gs.dlgActive)return;
+  const line=gs.dlgLines[gs.dlgIdx]||'';
+  const{name,role}=getSpeakerFromLine(line||gs.dlgTyped);
+
+  // Box
+  cx.fillStyle='rgba(8,6,18,0.97)';
+  roundRect(cx,20,GH-145,GW-40,125,12);cx.fill();
+
+  // Pink border for Sara, Blue for Emmanuel, Neutral otherwise
+  let borderColor='#FF8FAB';
+  if(role==='emman') borderColor='#4DB8FF';
+  else if(role==='npc'&&gs.dlgChar==='Emmanuel') borderColor='#4DB8FF';
+  cx.strokeStyle=borderColor;cx.lineWidth=2;
+  roundRect(cx,20,GH-145,GW-40,125,12);cx.stroke();
+
+  // Speaker tag
+  if(name){
+    const tagColor=role==='sara'?'#FF8FAB':(role==='emman'?'#4DB8FF':'#FF8FAB');
+    cx.fillStyle=tagColor;
+    roundRect(cx,30,GH-160,Math.max(name.length*9+20,80),20,5);cx.fill();
+    cx.fillStyle='#08060E';cx.font='bold 11px monospace';cx.textAlign='left';
+    cx.fillText(name,40,GH-147);
+  }
+
+  // Text (strip speaker prefix for display)
+  let displayText=gs.dlgTyped;
+  if(displayText.startsWith('Sara: '))displayText=displayText.slice(6);
+  else if(displayText.startsWith('Emmanuel: '))displayText=displayText.slice(10);
+
+  cx.fillStyle='#F0EEF0';cx.font='13px monospace';cx.textAlign='left';
+  wrapText(cx,displayText,36,GH-118,GW-84,22);
+
+  const cur=gs.dlgLines[gs.dlgIdx]||'';
+  if(gs.dlgTyped.length>=cur.length&&Math.floor(Date.now()/400)%2===0){
+    cx.fillStyle=borderColor;cx.fillText('▼',GW-55,GH-28);
+  }
+  cx.fillStyle='#666';cx.font='10px monospace';cx.textAlign='right';
+  cx.fillText(`${gs.dlgIdx+1}/${gs.dlgLines.length}`,GW-30,GH-28);
+}
+
+function wrapText(c,text,x,y,maxW,lineH){
+  const words=text.split(' ');let line='';
+  words.forEach((w,i)=>{
+    const test=line+w+' ';
+    if(c.measureText(test).width>maxW&&i>0){c.fillText(line.trim(),x,y);line=w+' ';y+=lineH;}
+    else line=test;
+  });
+  if(line)c.fillText(line.trim(),x,y);
+}
+function roundRect(c,x,y,w,h,r){
+  c.beginPath();c.moveTo(x+r,y);c.lineTo(x+w-r,y);c.arcTo(x+w,y,x+w,y+r,r);
+  c.lineTo(x+w,y+h-r);c.arcTo(x+w,y+h,x+w-r,y+h,r);c.lineTo(x+r,y+h);
+  c.arcTo(x,y+h,x,y+h-r,r);c.lineTo(x,y+r);c.arcTo(x,y,x+r,y,r);c.closePath();
+}
+
+// ── MOVEMENT & COLLISION ─────────────────────────────────────
+function updatePlayer(dt){
+  if(gs.dlgActive||gs.fadeState!=='none')return;
+  const p=gs.player;
+  const map=MAP_DATA[gs.map];
+  const spd=110;
+  let dx=0,dy=0;
+  if(movL()){dx=-1;p.dir='left';}else if(movR()){dx=1;p.dir='right';}
+  else if(movU()){dy=-1;p.dir='up';}else if(movD_k()){dy=1;p.dir='down';}
+  p.moving=(dx!==0||dy!==0);
+  if(p.moving){
+    p.frameT+=dt;
+    if(p.frameT>0.14){p.frame=p.frame%4+1;p.frameT=0;}
+    const nx=p.x+dx*spd*dt,ny=p.y+dy*spd*dt;
+    const hw=8,hh=4;
+    if(canMove(nx,p.y,hw,hh,map.grid))p.x=nx;
+    if(canMove(p.x,ny,hw,hh,map.grid))p.y=ny;
+  } else{p.frame=0;p.frameT=0;}
+}
+function canMove(x,y,hw,hh,grid){
+  const tw=grid[0].length,th=grid.length;
+  const fx=Math.floor((x+CHAR_W/2-hw)/TS),fy=Math.floor((y+CHAR_H-hh)/TS);
+  const tx=Math.floor((x+CHAR_W/2+hw)/TS),ty=Math.floor((y+CHAR_H+hh)/TS);
+  if(fx<0||tx>=tw||fy<0||ty>=th)return false;
+  const b=['0','3','8'];
+  return!b.includes(grid[fy][fx])&&!b.includes(grid[fy][tx])&&!b.includes(grid[ty][fx])&&!b.includes(grid[ty][tx]);
+}
+function playerTX(){return Math.floor((gs.player.x+CHAR_W/2)/TS);}
+function playerTY(){return Math.floor((gs.player.y+CHAR_H*0.85)/TS);}
+
+// ── PORTALS ──────────────────────────────────────────────────
+function checkPortals(){
+  if(gs.fadeState!=='none'||gs.dlgActive)return;
+  const map=MAP_DATA[gs.map];
+  const ptx=playerTX(),pty=playerTY();
+  const maxX=map.grid[0].length-1,maxY=map.grid.length-1;
+  if(gs.map==='town'){
+    if(pty<=0){doTransition('uni',14*TS,18*TS,'up');return;}
+    if(pty>=maxY){doTransition('deportiva',25*TS,3*TS,'down');return;}
+    if(ptx<=0){doTransition('callejon',27*TS,5*TS,'left');return;}
+    if(ptx>=maxX){doTransition('paraiso',2*TS,20*TS,'right');return;}
+  }
+  for(const p of (map.portals||[])){
+    if(ptx>=p.x&&ptx<p.x+p.w&&pty>=p.y&&pty<p.y+p.h){doTransition(p.target,p.tx,p.ty,p.dir);break;}
+  }
+}
+function doTransition(target,tx,ty,dir){
+  gs.fadeState='out';gs.fadeTarget={target,tx,ty,dir};
+}
+function updateFade(dt){
+  if(gs.fadeState==='none')return;
+  if(gs.fadeState==='out'){
+    gs.fade+=dt*2.5;
+    if(gs.fade>=1){gs.fade=1;gs.map=gs.fadeTarget.target;gs.player.x=gs.fadeTarget.tx;gs.player.y=gs.fadeTarget.ty;gs.player.dir=gs.fadeTarget.dir;gs.fadeState='in';}
+  } else{
+    gs.fade-=dt*2.5;
+    if(gs.fade<=0){gs.fade=0;gs.fadeState='none';gs.fadeTarget=null;}
+  }
+}
+
+// ── EVENTS ───────────────────────────────────────────────────
+function checkEvents(){
+  if(gs.dlgActive||gs.fadeState!=='none')return;
+  const evs=MAP_EVENTS[gs.map]||[];
+  const ptx=playerTX(),pty=playerTY();
+  gs.interactPrompt=false;gs.interactTarget=null;
+  for(const ev of evs){
+    if(ev.ch&&ev.ch!==gs.chapter)continue;
+    if(ev.type==='memory'&&gs.memories.has(ev.id))continue;
+    const d=Math.sqrt((ptx-ev.tx)**2+(pty-ev.ty)**2);
+    if(d<=ev.range){gs.interactPrompt=true;gs.interactTarget=ev;break;}
+  }
+}
+function triggerEvent(ev){
+  if(!ev)return;
+  switch(ev.type){
+    case 'npc':
+      startDlg(DLGS.em_npc,'Emmanuel',()=>{
+        startDlg(DLGS.em_yes,'Sara',()=>{sfx('collect');gs.chapter=2;});
+      },'emman');break;
+    case 'memory':
+      startDlg(DLGS[ev.id]||['...'],()=>{
+        gs.memories.add(ev.id);sfx('collect');
+        if(gs.memories.size>=MEMORIES_NEEDED){
+          setTimeout(()=>startDlg(DLGS.memories_full,()=>startDlg(DLGS.boss_intro,()=>startBoss())),200);
+        }
+      },'Recuerdo ❤️');break;
+    case 'hint':
+      startDlg(['Sara: "Qué bello día en el campus de la UTNG."','Sara: "Debo salir al Centro de Dolores a buscar a Emmanuel."','(Camina al sur para salir al pueblo)'],'Sara');break;
+  }
+}
+
+// ── BOSSES ───────────────────────────────────────────────────
+const BOSSES=[
+  {name:'LOS CELOS',color:'#3D0070',hp:60,maxHp:60,atk:10,def:0,atkMsgs:['¡Los Celos atacan con Paranoia!','¡Sombra de duda te golpea!'],winLines:DLGS.boss1_win,introLines:DLGS.boss1_intro},
+  {name:'LA DISTANCIA',color:'#1A2050',hp:75,maxHp:75,atk:12,def:2,atkMsgs:['¡La Distancia lanza Silencio!','¡4 meses pesa demasiado!'],winLines:DLGS.boss2_win,introLines:DLGS.boss2_intro},
+  {name:'LA NECEDAD',color:'#3A2800',hp:90,maxHp:90,atk:14,def:4,atkMsgs:['¡La Necedad golpea con Obstinación!','¡Promesa rota te lastima!'],winLines:DLGS.boss3_win,introLines:DLGS.boss3_intro},
+];
+function startBoss(){gs.scene='battle';gs.bossIdx=0;initBoss(0);}
+function initBoss(idx){const b=BOSSES[idx];gs.bossHp=b.hp;gs.bossMaxHp=b.maxHp;gs.saraHp=gs.saraMaxHp;gs.battlePhase='intro';gs.battleMsg='';gs.saraShake=0;gs.bossShake=0;startDlg(b.introLines,()=>{gs.battlePhase='select';});}
+function updateBattle(dt){
+  if(gs.dlgActive){updateDlg(dt);return;}
+  if(gs.battlePhase==='anim'){gs.battleAnim-=dt;if(gs.battleAnim<=0)gs.battlePhase='enemy';}
+  if(gs.battlePhase==='enemy')doEnemyTurn();
+  if(gs.battlePhase==='result'){gs.battleMsgTimer-=dt;if(gs.battleMsgTimer<=0){gs.battlePhase='select';gs.battleMsg='';}}
+  gs.saraShake=Math.max(0,gs.saraShake-dt*8);gs.bossShake=Math.max(0,gs.bossShake-dt*8);
+}
+function doPlayerAtk(type){
+  const b=BOSSES[gs.bossIdx];let dmg=0;
+  if(type==='attack'){dmg=Math.max(1,Math.floor(12+Math.random()*8)-b.def);}
+  else if(type==='defend'){gs.saraHp=Math.min(gs.saraMaxHp,gs.saraHp+15);gs.battleMsg='¡Sara se cura 15 HP!';gs.battlePhase='result';gs.battleMsgTimer=1.5;sfx('collect');return;}
+  else if(type==='special'){dmg=Math.floor(20+Math.random()*15);gs.battleMsg='¡Recuerdo especial! ¡Daño masivo!';}
+  gs.bossHp=Math.max(0,gs.bossHp-dmg);gs.bossShake=0.4;sfx('hit');
+  if(gs.bossHp<=0){gs.battleMsg=`¡${b.name} fue derrotado!`;gs.battlePhase='result';gs.battleMsgTimer=2;setTimeout(()=>bossWin(),2000);return;}
+  gs.battleMsg=`¡${type==='special'?'Fuerza Interior':'Ataque'}! ${dmg} de daño!`;gs.battlePhase='anim';gs.battleAnim=0.5;
+}
+function doEnemyTurn(){
+  const b=BOSSES[gs.bossIdx];const dmg=Math.max(1,b.atk-Math.floor(Math.random()*4));
+  gs.saraHp=Math.max(0,gs.saraHp-dmg);gs.saraShake=0.4;sfx('hit');
+  gs.battleMsg=`${b.atkMsgs[Math.floor(Math.random()*b.atkMsgs.length)]} (${dmg} daño)`;
+  gs.battlePhase='result';gs.battleMsgTimer=1.8;
+}
+function bossWin(){
+  startDlg(BOSSES[gs.bossIdx].winLines,()=>{gs.bossIdx++;if(gs.bossIdx>=BOSSES.length){gs.scene='ending';gs.endFrame=0;gs.endTimer=0;}else initBoss(gs.bossIdx);},'✨');
+}
+
+// ── INTRO ────────────────────────────────────────────────────
+const INTRO=[
+  {dur:5,text:'En un salón de clases de la UTNG...',sub:'[ Universidad Tecnológica del Norte de Guanajuato ]'},
+  {dur:5,text:'Sara tomaba sus apuntes, como siempre.',sub:'Estudiosa, tranquila, con su luz propia.'},
+  {dur:5,text:'Y en segundo cuatrimestre... Emmanuel se acercó.',sub:'"Al principio no sabía cómo hablarte... fui muy grosero contigo."'},
+  {dur:5,text:'Tratarte como a una "amiga" no funcionó.',sub:'"Me di cuenta de que no era la forma si quería llegar a ti."'},
+  {dur:5,text:'Emmanuel cambió. Se esforzó por ser más caballero.',sub:'"Y así fue como te conquisté... siendo el mejor galán."'},
+  {dur:6,text:'18 de JULIO de 2025',sub:'El inicio de nuestro noviazgo... un año de historia. ❤️'},
+];
+function drawClassroom(){
+  cx.fillStyle='#1A1228';cx.fillRect(0,0,GW,GH);
+  cx.fillStyle='#2A1F3A';cx.fillRect(0,GH*0.55,GW,GH*0.45);
+  for(let i=0;i<3;i++)for(let j=0;j<3;j++){cx.fillStyle='#3A2D20';cx.fillRect(100+j*160,GH*0.55+20+i*60,100,30);}
+  cx.fillStyle='#1A3320';cx.fillRect(GW*0.1,GH*0.05,GW*0.8,GH*0.3);
+}
+
+// ── ENDING ───────────────────────────────────────────────────
+const ENDING=[
+  {text:'Las sombras han sido derrotadas...',sub:'',dur:3},
+  {text:'El Centro vuelve a iluminarse.',sub:'',dur:3},
+  {text:'"Sara..."',sub:'— Emmanuel',dur:3},
+  {text:'"Sé que las cosas han sido difíciles."',sub:'"Que soy celoso, cerrado y necio."',dur:5},
+  {text:'"Sé que nos distanciamos y ha dolido..."',sub:'"Pero eres la persona más importante de mi vida."',dur:5},
+  {text:'"Gracias por todo lo hermoso que vivimos."',sub:'"Gracias por quedarte aunque soy complicado."',dur:5},
+  {text:'"Te extraño muchísimo."',sub:'"Espero que nuestra historia pueda seguir..."',dur:5},
+  {text:'❤️',sub:'Sara & Emmanuel — 18 de Julio 2025 ~ 18 de Julio 2026',dur:99},
+];
+
+// ── HP BAR ───────────────────────────────────────────────────
+function drawHPBar(x,y,w,h,cur,max,color){
+  cx.fillStyle='#1A1A2A';cx.fillRect(x,y,w,h);
+  cx.fillStyle=color;cx.fillRect(x+1,y+1,Math.max(0,(cur/max)*(w-2)),h-2);
+  cx.strokeStyle='#606080';cx.lineWidth=1;cx.strokeRect(x,y,w,h);
+}
+
+// ── RENDER MAP ────────────────────────────────────────────────
+function renderMap(mapId){
+  const data=MAP_DATA[mapId];const grid=data.grid;
+  const cam=getCamera();
+  const sX=Math.max(0,Math.floor(cam.x/TS)),sY=Math.max(0,Math.floor(cam.y/TS));
+  const eX=Math.min(grid[0].length,Math.ceil((cam.x+GW)/TS)+1);
+  const eY=Math.min(grid.length,Math.ceil((cam.y+GH)/TS)+1);
+  for(let ty=sY;ty<eY;ty++)for(let tx=sX;tx<eX;tx++){
+    drawTile(parseInt(grid[ty][tx]),tx*TS-cam.x,ty*TS-cam.y,tx,ty);
+  }
+}
+
+// ── DECORATIONS ──────────────────────────────────────────────
+function renderDecorations(mapId){
+  const cam=getCamera();
+  const T=(tx,ty)=>[tx*TS-cam.x,ty*TS-cam.y];
+
+  function drawProp(key,tx,ty,w,h){
+    const [px,py]=T(tx,ty);
+    drawSprite(key,px-w/2+TS/2,py-h+TS,w,h);
+  }
+
+  if(mapId==='town'){
+    // Labels for exits
+    cx.font='bold 9px sans-serif';
+    cx.fillStyle='#C8B0E0';cx.textAlign='center';cx.fillText('↑ UTNG',20*TS-cam.x,14);
+    cx.fillStyle='#C8E6A0';cx.textAlign='center';cx.fillText('↓ DEPORTIVA',20*TS-cam.x,29*TS-cam.y+12);
+    cx.fillStyle='#FFA080';cx.textAlign='left';cx.fillText('← TACOS',6,15*TS-cam.y);
+    cx.fillStyle='#A0C880';cx.textAlign='right';cx.fillText('PARAÍSO →',40*TS-cam.x-4,15*TS-cam.y);
+
+    // Decorative Premium Trees
+    const treePositions=[[5,7],[5,13],[5,21],[35,7],[35,13],[35,21],[12,5],[28,5],[12,26],[28,26]];
+    for(const[ttx,tty]of treePositions){drawProp('tree_premium',ttx,tty,96,120);}
+
+    // Shop doors with gold border
+    const doors=[[10,10],[10,20],[30,20]];
+    for(const[dx,dy]of doors){
+      const[px,py]=T(dx,dy);
+      cx.fillStyle='#5D4037';cx.fillRect(px,py,TS,TS);
+      cx.strokeStyle='#FFD700';cx.lineWidth=2;cx.strokeRect(px,py,TS,TS);
+    }
+    // Shop signs
+    const signs=[[10,7,'🥤 Tiendita'],[10,17,'🍽️ La Puerta'],[30,17,'📺 Taberna']];
+    for(const[sx,sy,label]of signs){
+      const[px,py]=T(sx,sy);
+      cx.fillStyle='rgba(8,6,18,0.9)';roundRect(cx,px-8,py-20,label.length*8+8,18,4);cx.fill();
+      cx.fillStyle='#FFD700';cx.font='bold 9px sans-serif';cx.textAlign='left';cx.fillText(label,px-4,py-7);
+    }
+
+    // Animated fountain at center plaza
+    const fsx=20*TS-cam.x+16,fsy=15*TS-cam.y+16;
+    cx.fillStyle='#546E7A';cx.beginPath();cx.arc(fsx,fsy,28,0,Math.PI*2);cx.fill();
+    cx.fillStyle='#00B0FF';cx.beginPath();cx.arc(fsx,fsy,20,0,Math.PI*2);cx.fill();
+    const ft=Date.now()/180;
+    for(let i=0;i<8;i++){
+      const ang=ft+i*Math.PI/4;
+      cx.fillStyle=`rgba(255,255,255,${0.6+Math.sin(ft*2+i)*0.3})`;
+      cx.fillRect(fsx+Math.cos(ang)*10-1,fsy+Math.sin(ang)*10-1,3,3);
+    }
+    cx.fillStyle='#90CAF9';cx.fillRect(fsx-3,fsy-8,6,6); // central stone
+
+    // Emmanuel NPC (chapter 1)
+    if(gs.chapter===1){
+      drawChar('emman',20*TS-cam.x,15*TS-cam.y-CHAR_H,'down',0);
+      cx.fillStyle='rgba(8,6,18,0.85)';roundRect(cx,20*TS-cam.x-10,15*TS-cam.y-CHAR_H-22,82,18,4);cx.fill();
+      cx.fillStyle='#FFD700';cx.font='bold 9px sans-serif';cx.textAlign='center';
+      cx.fillText('Emmanuel',20*TS-cam.x+CHAR_W/2,15*TS-cam.y-CHAR_H-9);
+    }
+  }
+
+  if(mapId==='uni'){
+    // Render the beautiful university building image at the top
+    drawSprite('uni_building', 255 - cam.x, 32 - cam.y, 450, 207);
+
+    // Some premium trees
+    for(const[ttx,tty]of[[3,11],[26,11],[8,11],[20,11]]) {
+      drawProp('tree_premium',ttx,tty,96,120);
+    }
+  }
+
+  if(mapId==='callejon'){
+    // Taco stand
+    const[sx,sy]=T(4,5);
+    cx.fillStyle='#B71C1C';cx.fillRect(sx,sy,3*TS,TS*1.5);
+    cx.fillStyle='#FFFFFF';cx.font='bold 10px sans-serif';cx.textAlign='center';
+    cx.fillText('TACOS EL CUÑADO',sx+TS*1.5,sy+TS*0.7);
+    // Steam particles
+    const st=Date.now()/300;
+    for(let i=0;i<4;i++){cx.fillStyle='rgba(255,255,255,0.35)';cx.fillRect(sx+20+i*22+Math.sin(st+i)*4,sy-8-((st*10+i*16)%20),3,3);}
+  }
+
+  if(mapId==='tiendita'){
+    cx.fillStyle='#3A506B';cx.fillRect(2*TS,3*TS,6*TS,TS);
+    cx.strokeStyle='#7AABC0';cx.lineWidth=1;cx.strokeRect(2*TS,3*TS,6*TS,TS);
+    cx.fillStyle='#FF8FAB';cx.font='bold 10px sans-serif';cx.textAlign='center';
+    cx.fillText('🥤 Malteadas',5*TS,3*TS+TS*0.65);
+
+    // Premium round table and chairs
+    drawProp('table_round', 5, 5.5, 96, 56);
+    drawProp('chair', 3.8, 5.5, 28, 40);
+    drawProp('chair', 6.2, 5.5, 28, 40);
+  }
+
+  if(mapId==='puerta'){
+    cx.fillStyle='#3E2723';cx.fillRect(4.5*TS,3.5*TS,3*TS,1.5*TS);
+    cx.fillStyle='#FFD700';cx.beginPath();cx.arc(6*TS,3.4*TS,4,0,Math.PI*2);cx.fill();
+    const nt=Date.now()/700;
+    cx.fillStyle='#FF8FAB';cx.font='14px serif';cx.textAlign='left';
+    cx.fillText('♪',5*TS+Math.sin(nt)*12,3*TS+Math.cos(nt)*8);
+    cx.fillText('❤',7*TS+Math.cos(nt*1.3)*12,2.8*TS+Math.sin(nt*1.3)*8);
+
+    // Elegant round table and chairs
+    drawProp('table_round', 5.5, 5.5, 96, 56);
+    drawProp('chair', 4.3, 5.5, 28, 40);
+    drawProp('chair', 6.7, 5.5, 28, 40);
+  }
+
+  if(mapId==='taberna'){
+    // TV
+    cx.fillStyle='#212121';cx.fillRect(4.5*TS,2.5*TS,3*TS,2.5*TS);
+    cx.fillStyle=`rgba(180,210,255,${0.4+Math.sin(Date.now()/90)*0.15})`;cx.fillRect(4.8*TS,2.8*TS,2.4*TS,1.8*TS);
+    // Mob Psycho text on screen
+    cx.fillStyle='rgba(255,255,255,0.7)';cx.font='bold 8px sans-serif';cx.textAlign='center';
+    cx.fillText('MOB PSYCHO 100',6*TS,3.6*TS);
+    // Sofa
+    cx.fillStyle='#B71C1C';roundRect(cx,3*TS,5.5*TS,6*TS,2*TS,8);cx.fill();
+    cx.fillStyle='#D32F2F';cx.fillRect(3*TS,5.5*TS,6*TS,0.6*TS);
+
+    // Rectangular table and chairs
+    drawProp('table_rect', 5.5, 5.5, 96, 61);
+    drawProp('chair', 4.3, 5.5, 28, 40);
+    drawProp('chair', 6.7, 5.5, 28, 40);
+  }
+
+  if(mapId==='deportiva'){
+    // Soccer field white lines
+    const[fx,fy]=T(10,18);
+    cx.strokeStyle='rgba(255,255,255,0.8)';cx.lineWidth=2;
+    cx.strokeRect(fx,fy,40*TS,18*TS);
+    // penalty areas
+    cx.strokeRect(fx,fy+5*TS,5*TS,8*TS);
+    cx.strokeRect(fx+35*TS,fy+5*TS,5*TS,8*TS);
+    // Center circle
+    cx.beginPath();cx.arc(fx+20*TS,fy+9*TS,3*TS,0,Math.PI*2);cx.stroke();
+    cx.beginPath();cx.moveTo(fx+20*TS,fy);cx.lineTo(fx+20*TS,fy+18*TS);cx.stroke();
+    // Goals
+    cx.strokeRect(fx-TS,fy+7*TS,TS,4*TS);
+    cx.strokeRect(fx+40*TS,fy+7*TS,TS,4*TS);
+    // Skate park ramps
+    const[sx2,sy2]=T(15,8);
+    cx.fillStyle='#78909C';
+    cx.beginPath();cx.moveTo(sx2,sy2+6*TS);cx.lineTo(sx2,sy2+3*TS);cx.lineTo(sx2+2*TS,sy2);cx.lineTo(sx2+4*TS,sy2);cx.lineTo(sx2+4*TS,sy2+6*TS);cx.fill();
+    cx.beginPath();cx.moveTo(sx2+6*TS,sy2+6*TS);cx.lineTo(sx2+6*TS,sy2+3*TS);cx.lineTo(sx2+8*TS,sy2);cx.lineTo(sx2+10*TS,sy2);cx.lineTo(sx2+10*TS,sy2+6*TS);cx.fill();
+    cx.strokeStyle='#B0BEC5';cx.lineWidth=3;cx.beginPath();cx.moveTo(sx2+4*TS,sy2+2*TS);cx.lineTo(sx2+6*TS,sy2+2*TS);cx.stroke();
+
+    // Premium trees around Deportiva
+    for(const[ttx,tty]of[[3,5],[3,15],[3,25],[56,5],[56,15],[56,25]]) {
+      drawProp('tree_premium',ttx,tty,96,120);
+    }
+  }
+
+  if(mapId==='paraiso'){
+    // Lots of premium trees around the field
+    for(const[ttx,tty]of[[3,3],[5,8],[3,15],[3,25],[3,35],[3,45],[55,5],[57,12],[55,22],[55,35],[12,3],[20,3],[35,3],[45,3]]) {
+      drawProp('tree_premium',ttx,tty,96,120);
+    }
+    // Wildflowers
+    for(let i=0;i<10;i++){
+      const px=((i*173)%50+3)*TS-getCamera().x,py=((i*97)%40+5)*TS-getCamera().y;
+      cx.fillStyle=['#FF8FAB','#FFD700','#FF69B4','#FFA0C0'][i%4];
+      cx.beginPath();cx.arc(px,py,4,0,Math.PI*2);cx.fill();
+    }
+    
+    // Draw House Facade (Beautiful RPG roofed house)
+    const [hx, hy] = T(25, 14); // sits on y=14..24, x=25..38
+    // House Walls (White/light gray stucco)
+    cx.fillStyle = '#ECEFF1';
+    cx.fillRect(hx, hy + 3*TS, 13*TS, 7*TS); // main house block
+    cx.strokeStyle = '#B0BEC5'; cx.lineWidth = 2;
+    cx.strokeRect(hx, hy + 3*TS, 13*TS, 7*TS);
+
+    // Red Roof (Tiled/triangle roof)
+    cx.fillStyle = '#D32F2F';
+    cx.beginPath();
+    cx.moveTo(hx - 16, hy + 3*TS);
+    cx.lineTo(hx + 6.5*TS, hy); // peak
+    cx.lineTo(hx + 13*TS + 16, hy + 3*TS);
+    cx.closePath();
+    cx.fill();
+    cx.strokeStyle = '#B71C1C'; cx.lineWidth = 3;
+    cx.stroke();
+
+    // Windows (Cute glass windows with light inside)
+    cx.fillStyle = '#FFF59D'; // warm light
+    cx.fillRect(hx + 2*TS, hy + 5*TS, 2*TS, 1.5*TS);
+    cx.strokeRect(hx + 2*TS, hy + 5*TS, 2*TS, 1.5*TS);
+    // window cross bars
+    cx.strokeStyle = '#37474F'; cx.lineWidth = 1.5;
+    cx.beginPath();
+    cx.moveTo(hx + 3*TS, hy + 5*TS); cx.lineTo(hx + 3*TS, hy + 6.5*TS);
+    cx.moveTo(hx + 2*TS, hy + 5.75*TS); cx.lineTo(hx + 4*TS, hy + 5.75*TS);
+    cx.stroke();
+
+    cx.fillStyle = '#FFF59D';
+    cx.fillRect(hx + 9*TS, hy + 5*TS, 2*TS, 1.5*TS);
+    cx.strokeRect(hx + 9*TS, hy + 5*TS, 2*TS, 1.5*TS);
+    cx.beginPath();
+    cx.moveTo(hx + 10*TS, hy + 5*TS); cx.lineTo(hx + 10*TS, hy + 6.5*TS);
+    cx.moveTo(hx + 9*TS, hy + 5.75*TS); cx.lineTo(hx + 11*TS, hy + 5.75*TS);
+    cx.stroke();
+
+    // Front Door (Beautiful dark wood door)
+    cx.fillStyle = '#5D4037';
+    cx.fillRect(hx + 5.5*TS, hy + 6.5*TS, 2*TS, 3.5*TS);
+    cx.strokeStyle = '#FFD700'; cx.lineWidth = 2; // gold frame
+    cx.strokeRect(hx + 5.5*TS, hy + 6.5*TS, 2*TS, 3.5*TS);
+    // Gold doorknob
+    cx.fillStyle = '#FFD700';
+    cx.beginPath();
+    cx.arc(hx + 7*TS - 8, hy + 8*TS + 6, 3, 0, Math.PI*2);
+    cx.fill();
+
+    // Label above door
+    cx.fillStyle='rgba(8,6,18,0.8)';roundRect(cx,hx + 4*TS,hy + 2*TS,140,16,4);cx.fill();
+    cx.fillStyle='#FFD700';cx.font='bold 9px sans-serif';cx.textAlign='center';
+    cx.fillText('🏡 Casa de Sara',hx + 4 * TS + 70,hy + 31);
+  }
+
+  if(mapId==='casa_sara'){
+    // Bedroom bed
+    const[rx,ry]=T(2,3);
+    cx.fillStyle='#78909C';cx.fillRect(rx,ry,2*TS,TS*1.2); // frame
+    cx.fillStyle='#FF8FAB';cx.fillRect(rx,ry,2*TS,TS*0.4); // pillow
+    cx.fillStyle='#F0EEF0';cx.fillRect(rx,ry+TS*0.4,2*TS,TS*0.8); // sheets
+
+    // Kitchen stove
+    const[sx,sy]=T(7,3);
+    cx.fillStyle='#546E7A';cx.fillRect(sx,sy,TS,TS*1.5);
+    cx.fillStyle='#00E676';cx.beginPath();cx.arc(sx+TS/2,sy+TS*0.5,8,0,Math.PI*2);cx.fill();
+
+    // Dining table & chairs
+    drawProp('table_round', 5, 5.5, 96, 56);
+    drawProp('chair', 3.8, 5.5, 28, 40);
+    drawProp('chair', 6.2, 5.5, 28, 40);
+  }
+}
+
+// ── SPARKLES ─────────────────────────────────────────────────
+function renderSparkles(){
+  if(gs.chapter!==2)return;
+  const evs=MAP_EVENTS[gs.map]||[];
+  const t=Date.now()/500;
+  const cam=getCamera();
+  for(const ev of evs){
+    if(ev.type!=='memory')continue;if(gs.memories.has(ev.id))continue;
+    const px=ev.tx*TS+16-cam.x,py=ev.ty*TS-cam.y;
+    cx.fillStyle=`rgba(255,143,171,${0.7+Math.sin(t+ev.tx)*0.3})`;
+    cx.font='22px serif';cx.textAlign='center';cx.fillText('✦',px,py+8);
+    cx.fillStyle='rgba(255,143,171,0.15)';cx.beginPath();cx.arc(px,py,14,0,Math.PI*2);cx.fill();
+  }
+}
+
+// ── MINIMAP ──────────────────────────────────────────────────
+function drawMinimap(){
+  const map=MAP_DATA[gs.map];const grid=map.grid;
+  const mx=GW-130,my=15,mw=115,mh=90;
+  cx.fillStyle='rgba(8,6,18,0.92)';roundRect(cx,mx,my,mw,mh,8);cx.fill();
+  cx.strokeStyle='#FF8FAB';cx.lineWidth=2;roundRect(cx,mx,my,mw,mh,8);cx.stroke();
+  const gw=grid[0].length,gh=grid.length;
+  const cw=mw/gw,ch=mh/gh;
+  for(let y=0;y<gh;y++)for(let x=0;x<gw;x++){
+    const t2=grid[y][x];
+    if(t2==='0'||t2==='8')cx.fillStyle='#3A271D';
+    else if(t2==='1'||t2==='7')cx.fillStyle='#6D5C50';
+    else if(t2==='6')cx.fillStyle='#8B5A2B';
+    else if(t2==='3')cx.fillStyle='#2D5F32';
+    else cx.fillStyle='#274E13';
+    cx.fillRect(mx+x*cw,my+y*ch,Math.max(1,cw),Math.max(1,ch));
+  }
+  const ppx=(gs.player.x/(gw*TS))*mw,ppy=(gs.player.y/(gh*TS))*mh;
+  cx.fillStyle='#FFFFFF';cx.beginPath();cx.arc(mx+ppx,my+ppy,4,0,Math.PI*2);cx.fill();
+  if(Math.floor(Date.now()/250)%2===0){
+    cx.strokeStyle='#FF8FAB';cx.lineWidth=1.5;cx.beginPath();cx.arc(mx+ppx,my+ppy,7,0,Math.PI*2);cx.stroke();
+  }
+  if(gs.map==='uni'){
+    if(Math.floor(Date.now()/300)%2===0){
+      cx.fillStyle='#00E676';cx.font='bold 11px sans-serif';cx.textAlign='center';
+      cx.fillText('▼ SALIDA', mx + mw/2, my + mh - 4);
+    }
+  }
+
+  // Draw uncollected memories on the minimap
+  if(gs.chapter===2){
+    const evs=MAP_EVENTS[gs.map]||[];
+    for(const ev of evs){
+      if(ev.type==='memory'&&!gs.memories.has(ev.id)){
+        const epx=(ev.tx/gw)*mw,epy=(ev.ty/gh)*mh;
+        cx.fillStyle='#FFD700';cx.beginPath();cx.arc(mx+epx,my+epy,3.5,0,Math.PI*2);cx.fill();
+        if(Math.floor(Date.now()/300)%2===0){
+          cx.strokeStyle='#FFD700';cx.lineWidth=1;cx.beginPath();cx.arc(mx+epx,my+epy,6,0,Math.PI*2);cx.stroke();
+        }
+      }
+    }
+    // If on town map, also draw yellow dots at shop doors and border portals with uncollected memories
+    if(gs.map==='town'){
+      const portalMems = [
+        {px:10.5, py:10, id:'mem_tiendita'},
+        {px:10.5, py:20, id:'mem_puerta'},
+        {px:31, py:20, id:'mem_taberna'},
+        {px:0.5, py:15, id:'mem_callejon'},
+        {px:39, py:15, id:'mem_paraiso'},
+        {px:20, py:29, id:'mem_deportiva'}
+      ];
+      for(const pm of portalMems){
+        if(!gs.memories.has(pm.id)){
+          const epx=(pm.px/gw)*mw,epy=(pm.py/gh)*mh;
+          cx.fillStyle='#FFD700';cx.beginPath();cx.arc(mx+epx,my+epy,3.5,0,Math.PI*2);cx.fill();
+          if(Math.floor(Date.now()/300)%2===0){
+            cx.strokeStyle='#FFD700';cx.lineWidth=1;cx.beginPath();cx.arc(mx+epx,my+epy,6,0,Math.PI*2);cx.stroke();
+          }
+        }
+      }
+    }
+    // If in paraiso, show yellow dot at house entrance leading to uncollected mem_paraiso inside casa_sara
+    if(gs.map==='paraiso' && !gs.memories.has('mem_paraiso')){
+      const epx=(31/gw)*mw,epy=(24/gh)*mh;
+      cx.fillStyle='#FFD700';cx.beginPath();cx.arc(mx+epx,my+epy,3.5,0,Math.PI*2);cx.fill();
+      if(Math.floor(Date.now()/300)%2===0){
+        cx.strokeStyle='#FFD700';cx.lineWidth=1;cx.beginPath();cx.arc(mx+epx,my+epy,6,0,Math.PI*2);cx.stroke();
+      }
+    }
+  }
+}
+
+// ── HUD ──────────────────────────────────────────────────────
+function renderHUD(){
+  cx.fillStyle='rgba(8,6,18,0.9)';roundRect(cx,15,15,300,38,6);cx.fill();
+  cx.strokeStyle='#FF8FAB';cx.lineWidth=1;roundRect(cx,15,15,300,38,6);cx.stroke();
+  cx.fillStyle='#FF8FAB';cx.font='bold 10px sans-serif';cx.textAlign='left';cx.fillText('OBJETIVO:',25,29);
+  cx.fillStyle='#FFFFFF';cx.font='11px sans-serif';
+  let obj=gs.chapter===1?'Busca a Emmanuel en el Centro de Dolores':`Junta los recuerdos (${gs.memories.size}/${MEMORIES_NEEDED})`;
+  cx.fillText(obj,25,44);
+  cx.fillStyle='rgba(8,6,18,0.8)';roundRect(cx,15,60,180,22,4);cx.fill();
+  cx.fillStyle='#C8D0F0';cx.font='bold 10px sans-serif';cx.fillText(MAP_DATA[gs.map].name,25,74);
+  drawMinimap();
+}
+
+// ── TITLE SCREEN ─────────────────────────────────────────────
+function updateTitle(dt){if(isAct()){sfx('collect');gs.scene='controls';}}
+function renderTitle(){
+  const t=Date.now()/1000;
+  const grd=cx.createLinearGradient(0,0,0,GH);grd.addColorStop(0,'#0A0018');grd.addColorStop(1,'#1A0828');
+  cx.fillStyle=grd;cx.fillRect(0,0,GW,GH);
+  for(let i=0;i<50;i++){cx.fillStyle=`rgba(255,200,230,${0.2+Math.sin(t*1.5+i)*0.15})`;cx.fillRect((i*137)%GW,(i*73)%GH,2,2);}
+  // Draw real sprites on title
+  if(imgsLoaded>0){
+    drawSprite('sara_down_idle',GW/2-110,GH/2-30,80,120);
+    drawSprite('emman_down_idle',GW/2+30,GH/2-30,80,120);
+    cx.save();cx.translate(GW/2-5,GH/2+80);cx.scale(1+Math.sin(t*2.5)*0.1,1+Math.sin(t*2.5)*0.1);
+    cx.fillStyle='#FF8FAB';cx.font='28px serif';cx.textAlign='center';cx.fillText('♥',0,0);cx.restore();
+  }
+  cx.fillStyle='#FFB3C6';cx.font='bold 28px sans-serif';cx.textAlign='center';cx.fillText('Sara & Emmanuel',GW/2,GH*0.15);
+  cx.fillStyle='#E0C0FF';cx.font='bold 18px sans-serif';cx.fillText('★  Un Año de Amor  ★',GW/2,GH*0.22);
+  cx.fillStyle='#6AB040';cx.font='11px sans-serif';cx.fillText('18 de Julio 2025 — 18 de Julio 2026',GW/2,GH*0.30);
+  if(imgsLoaded<imgTotal){cx.fillStyle='#888';cx.font='11px sans-serif';cx.fillText(`Cargando sprites... ${imgsLoaded}/${imgTotal}`,GW/2,GH*0.38);}
+  if(Math.floor(t*1.5)%2===0){cx.fillStyle='#FFFFFF';cx.font='13px sans-serif';cx.fillText('[ Presiona Z / Enter / Espacio para jugar ]',GW/2,GH-50);}
+}
+
+// ── CONTROLS SCREEN ──────────────────────────────────────────
+function updateControls(dt){if(isAct()){sfx('collect');gs.scene='intro';}}
+function renderControls(){
+  cx.fillStyle='#0A0018';cx.fillRect(0,0,GW,GH);
+  cx.strokeStyle='#FF8FAB';cx.lineWidth=3;cx.strokeRect(20,20,GW-40,GH-40);
+  cx.fillStyle='#FF8FAB';cx.font='bold 20px sans-serif';cx.textAlign='center';cx.fillText('CÓMO JUGAR',GW/2,65);
+  cx.strokeStyle='rgba(255,143,171,0.3)';cx.lineWidth=1;cx.beginPath();cx.moveTo(60,78);cx.lineTo(GW-60,78);cx.stroke();
+  const items=[
+    ['Mover','Flechas o W A S D'],['Hablar / Avanzar','Z, Enter o Espacio'],
+    ['Explorar','Cruza los bordes del mapa para cambiar de lugar'],
+    ['Recuerdos','Busca los destellos brillantes en cada mapa'],
+    ['Combate','A = Atacar  |  S = Curar  |  D = Especial'],
+    ['Minimapa','Tu posicion parpadea en el mapa (arriba derecha)'],
+  ];
+  cx.textAlign='left';let y=105;
+  for(const[lbl,val]of items){
+    cx.fillStyle='#FF8FAB';cx.font='bold 12px sans-serif';cx.fillText(lbl,60,y);
+    cx.fillStyle='#C8D0F0';cx.font='11px sans-serif';cx.fillText(val,60,y+16);y+=46;
+  }
+  if(Math.floor(Date.now()/500)%2===0){cx.fillStyle='#FFFFFF';cx.font='13px sans-serif';cx.textAlign='center';cx.fillText('[ Z / Enter para comenzar ]',GW/2,GH-40);}
+}
+
+// ── INTRO CUTSCENE ────────────────────────────────────────────
+function updateIntro(dt){
+  if(gs.dlgActive){updateDlg(dt);return;}
+  gs.cutTimer+=dt;const fr=INTRO[gs.cutFrame];if(!fr)return;
+  if(gs.cutTimer>=fr.dur||isAct()){sfx('dlg');gs.cutTimer=0;gs.cutFrame++;
+    if(gs.cutFrame>=INTRO.length){gs.scene='town';gs.map='uni';gs.player.x=14*TS;gs.player.y=10*TS;gs.player.dir='down';gs.chapter=1;setTimeout(()=>triggerEvent({type:'hint'}),300);}
+  }
+}
+function renderIntro(){
+  const fr=INTRO[gs.cutFrame];if(!fr)return;const t=gs.cutTimer;
+  drawClassroom();
+  // Show real sprites in intro
+  if(gs.cutFrame>=1)drawSprite('sara_down_idle',GW/2-90,GH/2-120,64,96);
+  if(gs.cutFrame>=2){const bounce=Math.sin(t*1.5)*4;drawSprite('emman_down_idle',GW/2+30+bounce,GH/2-120,64,96);}
+  const fadeIn=Math.min(1,t*2);cx.fillStyle=`rgba(10,0,24,${1-fadeIn})`;cx.fillRect(0,0,GW,GH);
+  cx.fillStyle='rgba(10,8,24,0.88)';cx.fillRect(0,GH-160,GW,160);
+  cx.fillStyle='#F0EEF0';cx.font='bold 16px sans-serif';cx.textAlign='center';cx.fillText(fr.text,GW/2,GH-108);
+  if(fr.sub){cx.fillStyle='#C8B0E0';cx.font='11px sans-serif';cx.fillText(fr.sub,GW/2,GH-78);}
+  for(let i=0;i<INTRO.length;i++){cx.fillStyle=i<=gs.cutFrame?'#FF8FAB':'#404060';cx.beginPath();cx.arc(GW/2+(i-INTRO.length/2+0.5)*20,GH-30,4,0,Math.PI*2);cx.fill();}
+}
+
+// ── TOWN SCENE ───────────────────────────────────────────────
+function updateTownScene(dt){
+  updateFade(dt);
+  if(gs.dlgActive||gs.fadeState!=='none'){updateDlg(dt);return;}
+  updatePlayer(dt);checkPortals();checkEvents();
+  if(gs.interactPrompt&&isAct())triggerEvent(gs.interactTarget);
+}
+function renderTownScene(){
+  const cam=getCamera();
+  renderMap(gs.map);renderDecorations(gs.map);renderSparkles();
+  drawChar('sara',gs.player.x-cam.x,gs.player.y-cam.y,gs.player.dir,gs.player.frame);
+  renderHUD();
+  if(gs.interactPrompt&&Math.floor(Date.now()/400)%2===0){
+    cx.fillStyle='rgba(8,6,18,0.92)';roundRect(cx,GW/2-90,GH/2-35,180,28,6);cx.fill();
+    cx.strokeStyle='#FF8FAB';cx.lineWidth=1.5;roundRect(cx,GW/2-90,GH/2-35,180,28,6);cx.stroke();
+    cx.fillStyle='#FFD700';cx.font='bold 11px sans-serif';cx.textAlign='center';cx.fillText('[ Z / Enter ] Hablar',GW/2,GH/2-16);
+  }
+  renderDlg();
+  if(gs.fade>0){cx.fillStyle=`rgba(10,0,24,${gs.fade})`;cx.fillRect(0,0,GW,GH);}
+}
+
+// ── BATTLE SCENE ─────────────────────────────────────────────
+function updateBattleScene(dt){
+  if(gs.dlgActive){updateDlg(dt);return;}updateBattle(dt);
+  if(gs.battlePhase==='select'){
+    if(kjust('KeyA')||kjust('Digit1'))doPlayerAtk('attack');
+    else if(kjust('KeyS')||kjust('Digit2'))doPlayerAtk('defend');
+    else if(kjust('KeyD')||kjust('Digit3')||kjust('KeyZ'))doPlayerAtk('special');
+  }
+}
+function renderBattleScene(){
+  const b=BOSSES[gs.bossIdx]||BOSSES[0];const t=Date.now()/1000;
+  const bgG=cx.createLinearGradient(0,0,0,GH);bgG.addColorStop(0,b.color);bgG.addColorStop(1,'#080018');
+  cx.fillStyle=bgG;cx.fillRect(0,0,GW,GH);
+  for(let i=0;i<20;i++){cx.fillStyle='rgba(200,100,255,0.12)';cx.fillRect(((i*137+t*30)%GW),((i*73+t*20)%GH),3,3);}
+  cx.fillStyle='rgba(255,200,255,0.6)';cx.font='11px sans-serif';cx.textAlign='right';cx.fillText(`Jefe ${gs.bossIdx+1}/3`,GW-20,20);
+  // Boss
+  const bsx=GW/2+(gs.bossShake>0?(Math.random()-0.5)*10:0);
+  drawBoss(gs.bossIdx,bsx,GH*0.3,t);
+  cx.fillStyle='rgba(0,0,0,0.6)';roundRect(cx,GW/2-120,20,240,30,5);cx.fill();
+  cx.fillStyle='#FFB3C6';cx.font='bold 13px sans-serif';cx.textAlign='center';cx.fillText(b.name,GW/2,37);
+  drawHPBar(GW/2-120,52,240,12,gs.bossHp,gs.bossMaxHp,'#BB44CC');
+  // Sara
+  const saraDX=gs.saraShake>0?(Math.random()-0.5)*8:0;
+  drawSprite('sara_right_idle',80+saraDX,GH-190,80,120);
+  cx.fillStyle='#FFB3C6';cx.font='bold 12px sans-serif';cx.textAlign='left';cx.fillText('Sara',80,GH-196);
+  drawHPBar(80,GH-192,160,10,gs.saraHp,gs.saraMaxHp,'#FF8FAB');
+  cx.fillStyle='#FFFFFF';cx.font='10px sans-serif';cx.fillText(`HP: ${gs.saraHp}/${gs.saraMaxHp}`,80,GH-201);
+  if(gs.battleMsg){cx.fillStyle='rgba(8,6,18,0.9)';roundRect(cx,20,GH-250,GW-40,46,6);cx.fill();cx.fillStyle='#E0C8FF';cx.font='12px sans-serif';cx.textAlign='center';cx.fillText(gs.battleMsg,GW/2,GH-222);}
+  if(gs.battlePhase==='select'&&!gs.dlgActive){
+    const bY=GH-95;
+    const btns=[{x:GW/2-160,w:100,label:'[A] Atacar',col:'#CC4466',key:'A'},{x:GW/2-40,w:100,label:'[S] Curar',col:'#2266CC',key:'S'},{x:GW/2+80,w:110,label:'[D] Especial ❤️',col:'#6622CC',key:'D'}];
+    for(const btn of btns){
+      const hov=kd(`Key${btn.key}`);
+      cx.fillStyle=hov?btn.col+'DD':btn.col+'88';roundRect(cx,btn.x,bY,btn.w,32,6);cx.fill();
+      cx.strokeStyle=btn.col;cx.lineWidth=1.5;roundRect(cx,btn.x,bY,btn.w,32,6);cx.stroke();
+      cx.fillStyle='#FFF';cx.font='bold 10px sans-serif';cx.textAlign='center';cx.fillText(btn.label,btn.x+btn.w/2,bY+20);
+    }
+  }
+  renderDlg();
+}
+function drawBoss(idx,x,y,t){
+  if(idx===0){
+    // Randall (Celos) - 120x160
+    drawSprite('boss_celos', x - 60, y - 80, 120, 160);
+  } else if(idx===1){
+    // Distance Stick Figures (Distancia) - 140x140
+    drawSprite('boss_distancia', x - 70, y - 70, 140, 140);
+  } else {
+    // Chess Donkey (Necedad) - 140x140
+    drawSprite('boss_necedad', x - 70, y - 70, 140, 140);
+  }
+}
+
+// ── ENDING SCENE ─────────────────────────────────────────────
+function updateEndingScene(dt){
+  if(gs.dlgActive){updateDlg(dt);return;}gs.endTimer+=dt;
+  const fr=ENDING[gs.endFrame];if(!fr)return;
+  if(gs.endTimer>=fr.dur||isAct()){sfx('dlg');gs.endTimer=0;if(gs.endFrame<ENDING.length-1)gs.endFrame++;}
+}
+function renderEndingScene(){
+  const t=gs.endTimer,fr=gs.endFrame,msg=ENDING[fr];
+  if(fr<2){cx.fillStyle='#0A0018';cx.fillRect(0,0,GW,GH);}
+  else{
+    const warm=Math.min(1,(fr-2)/5);
+    const grd=cx.createLinearGradient(0,0,0,GH);grd.addColorStop(0,`hsl(280,${30+warm*30}%,${8+warm*8}%)`);grd.addColorStop(1,`hsl(320,${20+warm*20}%,${5+warm*5}%)`);
+    cx.fillStyle=grd;cx.fillRect(0,0,GW,GH);
+    for(let i=0;i<40;i++){cx.fillStyle=`rgba(255,200,220,${0.25+Math.sin(t*2+i)*0.15})`;cx.fillRect((i*137)%GW,(i*73)%(GH-100),2,2);}
+  }
+  if(fr>=2){
+    const bounce=Math.sin(t*1.5)*4;
+    // Sara faces right, Emmanuel faces FRONT (down) in the ending
+    drawChar('sara', GW/2-110, GH/2-30+bounce, 'right', 0);
+    drawChar('emman', GW/2+30, GH/2-30-bounce, 'down', 0);
+    cx.save();cx.translate(GW/2-5,GH/2+50);cx.scale(1.2+Math.sin(t*2)*0.1,1.2+Math.sin(t*2)*0.1);cx.fillStyle='#FF8FAB';cx.font='36px serif';cx.textAlign='center';cx.fillText('\u2665',0,0);cx.restore();
+  }
+  if(fr<7){
+    cx.fillStyle='rgba(8,5,20,0.92)';cx.fillRect(0,GH-160,GW,160);
+    cx.strokeStyle='rgba(255,143,171,0.3)';cx.lineWidth=1;cx.beginPath();cx.moveTo(0,GH-160);cx.lineTo(GW,GH-160);cx.stroke();
+    cx.fillStyle='#F0EEF0';cx.font='bold 16px sans-serif';cx.textAlign='center';cx.fillText(msg.text,GW/2,GH-110);
+    if(msg.sub){cx.fillStyle='#C8A0E0';cx.font='11px sans-serif';cx.fillText(msg.sub,GW/2,GH-78);}
+  } else {
+    cx.fillStyle='rgba(8,5,20,0.88)';roundRect(cx,GW/2-210,GH-200,420,178,10);cx.fill();
+    cx.strokeStyle='#FF8FAB';cx.lineWidth=2;roundRect(cx,GW/2-210,GH-200,420,178,10);cx.stroke();
+    cx.fillStyle='#FF8FAB';cx.font='bold 18px sans-serif';cx.textAlign='center';cx.fillText('Sara & Emmanuel: Un Año',GW/2,GH-170);
+    cx.strokeStyle='#FF8FAB40';cx.lineWidth=1;cx.beginPath();cx.moveTo(GW/2-150,GH-155);cx.lineTo(GW/2+150,GH-155);cx.stroke();
+    cx.fillStyle='#C8D0F0';cx.font='11px sans-serif';cx.fillText('18 de Julio 2025 — 18 de Julio 2026',GW/2,GH-140);
+    cx.fillStyle='#FFD700';cx.font='bold 12px sans-serif';cx.fillText('Hecho con todo mi amor para ti, Sara',GW/2,GH-112);
+    cx.fillStyle='#FFFFFF';cx.font='12px sans-serif';cx.fillText('Tu Emmanuel ❤️',GW/2,GH-90);
+    cx.fillStyle='#80FF80';cx.font='11px sans-serif';cx.fillText('— Continuará. Parte II: El Presente —',GW/2,GH-68);
+  }
+}
+
+// ── AUDIO ─────────────────────────────────────────────────────
+const bgmDua = new Audio("Dua Lipa - Break My Heart (Official Video).mp3");
+bgmDua.loop = true;
+bgmDua.volume = 0.35;
+
+const bgmOnePiece = new Audio("One Piece OST Overtaken.mp3");
+bgmOnePiece.loop = true;
+bgmOnePiece.volume = 0.4;
+
+const bgmMice = new Audio("Mice on Venus.mp3");
+bgmMice.loop = true;
+bgmMice.volume = 0.45;
+
+let audioCtx=null;
+function initAudio(){try{audioCtx=new(window.AudioContext||window.webkitAudioContext)();}catch(e){audioCtx=null;}}
+function note(freq,start,dur,vol=0.07,type='triangle'){
+  if(!audioCtx)return;
+  const o=audioCtx.createOscillator(),g2=audioCtx.createGain();
+  o.type=type;o.frequency.value=freq;
+  g2.gain.setValueAtTime(0,start);g2.gain.linearRampToValueAtTime(vol,start+0.02);g2.gain.exponentialRampToValueAtTime(0.0001,start+dur-0.02);
+  o.connect(g2);g2.connect(audioCtx.destination);o.start(start);o.stop(start+dur);
+}
+function sfx(type){
+  if(!audioCtx)return;const t=audioCtx.currentTime;
+  if(type==='collect'){note(523,t,0.1,0.08,'sine');note(659,t+0.1,0.1,0.08,'sine');note(784,t+0.2,0.15,0.1,'sine');}
+  else if(type==='hit'){note(150,t,0.08,0.08,'sawtooth');note(120,t+0.05,0.1,0.06,'sawtooth');}
+  else if(type==='dlg'){note(880,t,0.02,0.02,'square');}
+}
+let lastMelScene='';
+let currentAudio=null;
+function playBGM(scene){
+  let targetAudio = null;
+  let useSynth = false;
+
+  if (scene === 'ending') {
+    // MUST be first — gs.map is still 'town' when ending fires
+    targetAudio = bgmMice;
+  } else if (scene === 'battle') {
+    targetAudio = bgmOnePiece;
+  } else if ((scene === 'town' || gs.map === 'casa_sara') && gs.chapter === 2) {
+    targetAudio = bgmDua;
+  } else if (scene === 'title' || scene === 'controls' || scene === 'intro' || (scene === 'town' && gs.chapter === 1)) {
+    useSynth = true;
+  }
+
+  // Manage MP3 BGM Transitions
+  if (currentAudio !== targetAudio) {
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+    }
+    currentAudio = targetAudio;
+    if (currentAudio) {
+      currentAudio.play().catch(e => console.log("BGM autoplay blocked:", e));
+    }
+  }
+
+  // Manage procedural synthesizer BGM for introductory scenes
+  if (useSynth) {
+    if (scene !== lastMelScene) {
+      lastMelScene = scene;
+      if (!audioCtx) return;
+      const t = audioCtx.currentTime;
+      const mels = {
+        title: [[523, 0.4], [392, 0.4], [440, 0.4], [523, 0.6]],
+        explore: [[261, 0.3], [329, 0.3], [392, 0.3], [440, 0.3], [392, 0.3], [329, 0.3], [261, 0.5]]
+      };
+      const key = scene === 'title' || scene === 'controls' ? 'title' : 'explore';
+      let ct = t;
+      for (const [f, d] of (mels[key] || [])) {
+        note(f, ct, d * 0.9);
+        ct += d;
+      }
+    }
+  } else {
+    lastMelScene = '';
+  }
+}
+window.addEventListener('keydown',()=>{if(!audioCtx)initAudio(); playBGM(gs.scene);},{once:false});
+window.addEventListener('click',()=>{if(!audioCtx)initAudio(); playBGM(gs.scene);},{once:false});
+
+// ── MAIN LOOP ─────────────────────────────────────────────────
+let lastTs=0;
+function loop(ts){
+  const dt=Math.min((ts-lastTs)/1000,0.1);lastTs=ts;
+  cx.clearRect(0,0,GW,GH);cx.fillStyle='#0A0018';cx.fillRect(0,0,GW,GH);
+  if(gs.scene==='title'){updateTitle(dt);renderTitle();}
+  else if(gs.scene==='controls'){updateControls(dt);renderControls();}
+  else if(gs.scene==='intro'){updateIntro(dt);renderIntro();}
+  else if(gs.scene==='town'){updateTownScene(dt);renderTownScene();}
+  else if(gs.scene==='battle'){updateBattleScene(dt);renderBattleScene();}
+  else if(gs.scene==='ending'){updateEndingScene(dt);renderEndingScene();}
+  if(audioCtx)playBGM(gs.scene);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(ts=>{lastTs=ts;requestAnimationFrame(loop);});
+</script>
+</body>
+</html>
